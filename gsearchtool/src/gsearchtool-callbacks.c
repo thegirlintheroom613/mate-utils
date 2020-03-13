@@ -1032,6 +1032,45 @@ open_with_list_sort (gconstpointer a,
 	return result;
 }
 
+static void /*taken from msd-xrandr-manager.c in mate-settings-daemon*/
+title_item_size_allocate_cb (GtkWidget *widget, GtkAllocation *allocation, gpointer data)
+{
+        /* When GtkMenu does size_request on its items, it asks them for their "toggle size",
+         * which will be non-zero when there are check/radio items.  GtkMenu remembers
+         * the largest of those sizes.  During the size_allocate pass, GtkMenu calls
+         * gtk_menu_item_toggle_size_allocate() with that value, to tell the menu item
+         * that it should later paint its child a bit to the right of its edge.
+         *
+         * However, we want the "title" menu items for each RANDR output to span the *whole*
+         * allocation of the menu item, not just the "allocation minus toggle" area.
+         *
+         * So, we let the menu item size_allocate itself as usual, but this
+         * callback gets run afterward.  Here we hack a toggle size of 0 into
+         * the menu item, and size_allocate it by hand *again*.  We also need to
+         * avoid recursing into this function.
+         */
+
+        g_assert (GTK_IS_MENU_ITEM (widget));
+
+        gtk_menu_item_toggle_size_allocate (GTK_MENU_ITEM (widget), 0);
+
+        g_signal_handlers_block_by_func (widget, title_item_size_allocate_cb, NULL);
+
+        /* Sigh. There is no way to turn on GTK_ALLOC_NEEDED outside of GTK+
+         * itself; also, since calling size_allocate on a widget with the same
+         * allcation is a no-op, we need to allocate with a "different" size
+         * first.
+         */
+
+        allocation->width++;
+        gtk_widget_size_allocate (widget, allocation);
+
+        allocation->width--;
+        gtk_widget_size_allocate (widget, allocation);
+
+        g_signal_handlers_unblock_by_func (widget, title_item_size_allocate_cb, NULL);
+}
+
 static void
 build_popup_menu_for_file (GSearchWindow * gsearch,
                            gchar * file)
@@ -1039,6 +1078,11 @@ build_popup_menu_for_file (GSearchWindow * gsearch,
 	GtkWidget * new1, * image1, * separatormenuitem1;
 	GtkWidget * new2;
 	gint i;
+    GtkWidget *box;
+    GtkWidget *label;
+    GSettings *icon_settings;
+
+    icon_settings = g_settings_new ("org.mate.interface");
 
 	if (GTK_IS_MENU (gsearch->search_results_popup_menu) == TRUE) {
 		g_object_ref_sink (gsearch->search_results_popup_menu);
@@ -1237,14 +1281,20 @@ build_popup_menu_for_file (GSearchWindow * gsearch,
 
 	/* Popup menu item: Copy Path */
 	if (gtk_tree_selection_count_selected_rows (GTK_TREE_SELECTION (gsearch->search_results_selection)) == 1) {
-		new1 = gtk_image_menu_item_new_with_mnemonic  (_("Copy _Path"));
-		gtk_container_add (GTK_CONTAINER (gsearch->search_results_popup_menu), new1);
-		gtk_widget_show (new1);
-
-		image1 = gtk_image_new_from_icon_name ("edit-copy", GTK_ICON_SIZE_MENU);
-		gtk_image_menu_item_set_image (GTK_IMAGE_MENU_ITEM (new1), image1);
-		gtk_widget_show (image1);
-
+        new1 = gtk_menu_item_new ();
+        box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+        label = gtk_accel_label_new (_("Copy _Path"));
+        gtk_container_add (GTK_CONTAINER (gsearch->search_results_popup_menu), new1);
+        /*Load the icon unless the user has icons in menus turned off*/
+            if (g_settings_get_boolean (icon_settings, "menus-have-icons")){
+                image1 = gtk_image_new_from_icon_name ("edit-copy", GTK_ICON_SIZE_MENU);
+                gtk_container_add (GTK_CONTAINER (box), GTK_WIDGET(image1));
+            }
+        gtk_container_add (GTK_CONTAINER (box), GTK_WIDGET(label));
+        gtk_container_add (GTK_CONTAINER (new1), GTK_WIDGET(box));
+        g_signal_connect (new1, "size-allocate",
+                G_CALLBACK (title_item_size_allocate_cb), NULL);
+        gtk_widget_show_all(new1);
 		g_signal_connect (G_OBJECT (new1),
 		                  "activate",
 		                  G_CALLBACK (copy_path_cb),
