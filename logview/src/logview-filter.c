@@ -116,6 +116,10 @@ logview_filter_get_property (GObject *object, guint prop_id, GValue *value, GPar
     case PROP_TEXTTAG:
       g_value_set_object (value, priv->tag);
       break;
+    default:
+      /* We don't have any other property... */
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
   }
 }
 
